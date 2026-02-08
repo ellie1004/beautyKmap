@@ -29,7 +29,6 @@ const App: React.FC = () => {
   const [searchStatus, setSearchStatus] = useState('');
   const [realPros, setRealPros] = useState<any[]>([]);
   const [registeredPros, setRegisteredPros] = useState<BeautyProfessional[]>([]);
-  const [mapMoved, setMapMoved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
@@ -47,7 +46,15 @@ const App: React.FC = () => {
   const leafletMapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
-  const apiKey = process.env.API_KEY;
+  // API Key를 안전하게 가져오는 헬퍼 함수
+  const getSafeApiKey = () => {
+    try {
+      // Vercel 환경 변수 우선 참조
+      return process.env.API_KEY;
+    } catch (e) {
+      return null;
+    }
+  };
 
   const allProfessionals = useMemo(() => {
     const filteredSamples = SAMPLE_PROS.filter((pro) => {
@@ -82,12 +89,12 @@ const App: React.FC = () => {
     return [...filteredRegistered, ...filteredSamples, ...transformedReal];
   }, [selectedCategory, searchQuery, realPros, registeredPros]);
 
-  // AI를 이용한 지역 좌표 검색 (Geocoding)
   const getCoordinatesForQuery = async (query: string) => {
-    if (!apiKey) return null;
+    const key = getSafeApiKey();
+    if (!key) return null;
     try {
-      const ai = new GoogleGenAI({ apiKey: apiKey });
-      const prompt = `주어진 검색어 '${query}'에서 지리적 위치(예: 해운대, 성수동 등)를 파악해서 해당 지역의 위도(latitude)와 경도(longitude)만 JSON 형식으로 반환해줘. 위치 정보가 없으면 현재 지도의 위치를 유지하도록 null을 반환해.`;
+      const ai = new GoogleGenAI({ apiKey: key });
+      const prompt = `주어진 검색어 '${query}'에서 지리적 위치(예: 해운대, 성수동 등)를 파악해서 해당 지역의 위도(latitude)와 경도(longitude)만 JSON 형식으로 반환해줘. 위치 정보가 없으면 found를 false로 반환해.`;
       
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -100,7 +107,8 @@ const App: React.FC = () => {
               lat: { type: Type.NUMBER },
               lng: { type: Type.NUMBER },
               found: { type: Type.BOOLEAN }
-            }
+            },
+            required: ["found"]
           }
         }
       });
@@ -114,8 +122,9 @@ const App: React.FC = () => {
   };
 
   const fetchRealPros = async (lat: number, lng: number, specificQuery: string = "") => {
-    if (!apiKey) {
-      setError("API Key가 설정되지 않았습니다.");
+    const key = getSafeApiKey();
+    if (!key) {
+      setError("API Key가 설정되지 않았습니다. Vercel 환경 변수를 확인해주세요.");
       return;
     }
     
@@ -126,25 +135,23 @@ const App: React.FC = () => {
     let targetLat = lat;
     let targetLng = lng;
 
-    // 만약 검색어에 특정 지역명이 포함된 경우 좌표를 먼저 이동
     if (specificQuery.length > 1) {
       const newCoords = await getCoordinatesForQuery(specificQuery);
       if (newCoords) {
         targetLat = newCoords.lat;
         targetLng = newCoords.lng;
         setSearchStatus(`${specificQuery} 지역으로 이동 중...`);
-        leafletMapRef.current?.flyTo([targetLat, targetLng], 15, { duration: 2 });
-        // 애니메이션 대기
-        await new Promise(r => setTimeout(r, 1500));
+        leafletMapRef.current?.flyTo([targetLat, targetLng], 15, { duration: 1.5 });
+        await new Promise(r => setTimeout(r, 1200));
       }
     }
 
-    setSearchStatus("베테랑 전문가 찾는 중...");
+    setSearchStatus("전문가 리스트 업데이트 중...");
     
     try {
-      const ai = new GoogleGenAI({ apiKey: apiKey });
-      const categoryTerm = selectedCategory === '전체' ? '인기 뷰티 전문가, 네일아트 원장' : selectedCategory + ' 전문가';
-      const prompt = `위도 ${targetLat}, 경도 ${targetLng} 근처에서 활동하는 ${categoryTerm}를 찾아줘. ${specificQuery ? `'${specificQuery}' 테마의 실력 있는 전문가 위주로.` : ''} 전문가가 운영하는 스튜디오 정보를 리스팅해줘.`;
+      const ai = new GoogleGenAI({ apiKey: key });
+      const categoryTerm = selectedCategory === '전체' ? '인기 뷰티 전문가' : selectedCategory + ' 전문가';
+      const prompt = `위도 ${targetLat}, 경도 ${targetLng} 근처에서 활동하는 ${categoryTerm}를 찾아줘. ${specificQuery ? `'${specificQuery}' 테마의 전문가 위주로.` : ''} 전문가가 운영하는 스튜디오 정보를 리스팅해줘.`;
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -172,13 +179,10 @@ const App: React.FC = () => {
             const seen = new Set();
             return combined.filter(item => { const k = item.title; return seen.has(k) ? false : seen.add(k); }).slice(0, 40);
         });
-      } else {
-        setSearchStatus("이 지역에는 검색된 결과가 없습니다.");
-        setTimeout(() => setSearchStatus(""), 2000);
       }
     } catch (err: any) { 
       console.error(err);
-      setError(err.message || "데이터를 불러오는 중 오류가 발생했습니다.");
+      setError("AI 전문가 탐색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
     } finally { 
       setIsSearching(false); 
       setSearchStatus("");
@@ -191,8 +195,6 @@ const App: React.FC = () => {
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
-    map.on('dragend', () => setMapMoved(true));
-    map.on('zoomend', () => setMapMoved(true));
     leafletMapRef.current = map;
     
     if (navigator.geolocation) {
@@ -234,7 +236,7 @@ const App: React.FC = () => {
         <div class="relative h-24 bg-gradient-to-r from-pink-400 to-rose-400">
            <img src="${pro.imageUrl}" class="absolute -bottom-6 left-4 w-16 h-16 rounded-2xl border-4 border-white object-cover shadow-lg" />
            <div class="absolute top-2 right-2 bg-white/30 backdrop-blur-md px-2 py-1 rounded-lg text-white text-[10px] font-bold uppercase tracking-widest">
-             ${pro.experience}Yrs Experience
+             ${pro.experience}Yrs Exp
            </div>
         </div>
         <div class="p-4 pt-8">
@@ -243,17 +245,11 @@ const App: React.FC = () => {
             <span class="text-[10px] text-pink-500 font-bold bg-pink-50 px-2 py-0.5 rounded-md">${pro.category}</span>
           </div>
           <p class="text-[11px] text-gray-500 font-medium line-clamp-2 mb-3">"${pro.bio}"</p>
-          <div class="flex flex-wrap gap-1 mb-4">
-            ${pro.specialties.map((s: string) => `<span class="text-[9px] bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full border border-gray-100">#${s}</span>`).join('')}
-          </div>
           <div class="flex flex-col gap-2">
             <a href="${pro.kakaoLink || '#'}" target="_blank" class="w-full bg-[#FEE500] text-[#3c1e1e] py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 hover:bg-[#F7E111] transition-colors shadow-lg shadow-yellow-100 no-underline">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 3c-4.97 0-9 3.134-9 7 0 2.419 1.557 4.542 3.945 5.795l-.999 3.666c-.123.454.414.736.755.433l4.398-3.141c.299.031.603.047.911.047 4.97 0 9-3.134 9-7s-4.03-7-9-7z"/></svg>
               카카오톡 상담하기
             </a>
-            <button class="w-full bg-gray-900 text-white py-2.5 rounded-xl text-[10px] font-bold tracking-tight hover:bg-black transition-colors">
-              전문가 포트폴리오 보기
-            </button>
           </div>
         </div>
       `;
