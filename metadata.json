@@ -1,0 +1,7 @@
+{
+  "name": "GlowMap - Beauty Finder",
+  "description": "A premium location-based map application for finding beauty services like nail art, eyelashes, and makeup in Seoul.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
