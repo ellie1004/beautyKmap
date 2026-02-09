@@ -14,7 +14,8 @@ import {
   X,
   MessageCircle,
   Camera,
-  MapPin
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { SAMPLE_PROS, CATEGORIES } from './constants';
@@ -29,7 +30,7 @@ const App: React.FC = () => {
   const [searchStatus, setSearchStatus] = useState('');
   const [realPros, setRealPros] = useState<any[]>([]);
   const [registeredPros, setRegisteredPros] = useState<BeautyProfessional[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{message: string, type: 'api' | 'general'} | null>(null);
   
   const [isRegModalOpen, setIsRegModalOpen] = useState(false);
   const [regData, setRegData] = useState({
@@ -46,11 +47,17 @@ const App: React.FC = () => {
   const leafletMapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
-  // API Key를 안전하게 가져오는 헬퍼 함수
+  // API Key를 더 안전하게 가져오고 검증하는 함수
   const getSafeApiKey = () => {
     try {
-      // Vercel 환경 변수 우선 참조
-      return process.env.API_KEY;
+      // 1. process.env.API_KEY 확인
+      const key = process.env.API_KEY;
+      
+      // 키가 문자열 "undefined"거나 "process.env.API_KEY"로 박혀있는 경우 처리
+      if (key && key !== "undefined" && key !== "null" && key !== "" && !key.includes("process.env")) {
+        return key;
+      }
+      return null;
     } catch (e) {
       return null;
     }
@@ -124,7 +131,10 @@ const App: React.FC = () => {
   const fetchRealPros = async (lat: number, lng: number, specificQuery: string = "") => {
     const key = getSafeApiKey();
     if (!key) {
-      setError("API Key가 설정되지 않았습니다. Vercel 환경 변수를 확인해주세요.");
+      setError({
+        message: "API Key가 설정되지 않았습니다. Vercel에서 'API_KEY' 변수를 추가하고 반드시 'Redeploy'를 해주세요.",
+        type: 'api'
+      });
       return;
     }
     
@@ -182,7 +192,7 @@ const App: React.FC = () => {
       }
     } catch (err: any) { 
       console.error(err);
-      setError("AI 전문가 탐색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+      setError({message: "AI 전문가 탐색 중 오류가 발생했습니다. API 키의 유효성을 확인해주세요.", type: 'general'});
     } finally { 
       setIsSearching(false); 
       setSearchStatus("");
@@ -329,9 +339,26 @@ const App: React.FC = () => {
         <div ref={mapRef} className="w-full h-full z-0" />
 
         {error && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[2000] bg-white border border-red-100 text-red-500 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-black animate-in fade-in slide-in-from-top-4">
-            <AlertCircle size={20} />
-            {error}
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[2000] bg-white border border-red-100 text-red-500 px-8 py-6 rounded-[2rem] shadow-2xl flex flex-col items-center gap-4 font-black animate-in fade-in slide-in-from-top-8 w-[90%] max-w-lg text-center">
+            <div className="bg-red-50 p-4 rounded-full text-red-500">
+              <AlertCircle size={32} />
+            </div>
+            <p className="text-gray-800 text-lg leading-snug whitespace-pre-wrap">{error.message}</p>
+            {error.type === 'api' && (
+              <div className="flex flex-col gap-2 w-full">
+                <div className="bg-gray-50 p-4 rounded-2xl text-[13px] text-left text-gray-500 font-medium space-y-1">
+                    <p>1. Vercel Settings -> Environment Variables 이동</p>
+                    <p>2. Key: <span className="text-pink-600 font-black">API_KEY</span> / Value: <span className="text-pink-600 font-black">구글키</span> 입력</p>
+                    <p>3. 상단 탭 Deployments -> 최신 항목의 <span className="font-bold">Redeploy</span> 클릭</p>
+                </div>
+                <button 
+                    onClick={() => window.location.reload()}
+                    className="mt-2 bg-gray-900 text-white py-4 rounded-2xl flex items-center justify-center gap-2 hover:bg-black transition-all"
+                >
+                    <RefreshCw size={18} /> 설정 완료 후 새로고침
+                </button>
+              </div>
+            )}
           </div>
         )}
 
